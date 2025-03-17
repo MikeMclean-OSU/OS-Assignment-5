@@ -6,21 +6,79 @@
 #include <sys/socket.h>
 #include <netinet/in.h>
 
-void processFile(char* filePath, char **readString){
-  char *currLine = NULL;
-  size_t len = 0;
+char *processFile(char* plainTextPath, char* keyFilePath){
+  size_t len_plaintext = 0;
+  size_t len_key = 0;
+  char *plaintextString = NULL;
+  char *keyFileString = NULL;
+  int textLetter;
+  int keyLetter;
 
-  FILE *encFile = fopen(filePath, "r");
+  printf("Starting processing files\n");
 
-  if(getline(&currLine, &len, encFile) != -1){
-    *readString = malloc(len);
-    strncpy(*readString, currLine, len);
+  FILE *messageFile = fopen(plainTextPath, "r");
+  FILE *keyFile = fopen(keyFilePath, "r");
+
+  if (!messageFile || !keyFile) {
+    printf("Error opening files.\n");
+    return NULL;
   }
 
-  free(currLine);
-  fclose(encFile);
+  if (getline(&plaintextString, &len_plaintext, messageFile) == -1){
+    printf("Error reading plaintext file.\n");
+    return NULL;
+  }
+
+  if (getline(&keyFileString, &len_key, keyFile) == -1){
+    printf("Error reading key file.\n");
+    return NULL;
+  }
+  
+  len_plaintext = strlen(plaintextString);
+  len_key = strlen(keyFileString);
+  
+  fclose(messageFile);
+  fclose(keyFile);
+
+  if (len_key < len_plaintext){
+    free(plaintextString);
+    free(keyFileString);
+    return NULL;
+  }
+
+  char *cipherText = malloc(len_plaintext + 1);
+  int cipherLetter;
+
+  for (int i = 0; i< len_plaintext - 1; i++){
+    if (plaintextString[i] == ' '){
+      textLetter = 26;
+    }else{
+      textLetter = plaintextString[i] - 'A';
+    }
+
+    if (keyFileString[i] == ' '){
+      keyLetter = 26;
+    }else{
+      keyLetter = keyFileString[i] - 'A';
+    }
+
+    cipherLetter = (textLetter + keyLetter) % 27;
+    if (cipherLetter == 26){
+      cipherText[i] = ' ';
+    }else{
+      cipherText[i] = 'A' + cipherLetter;
+    }
+  }
+
+  cipherText[len_plaintext] = '\0';
+
+  free(plaintextString);
+  free(keyFileString);
+  printf("%s\n", cipherText);
+  return cipherText;
 
 }
+
 
 // Error function used for reporting issues
 void error(const char *msg) {
@@ -48,8 +106,6 @@ int main(int argc, char *argv[]){
   char plaintext[256];
   char key[256];
   char verifykey[50];
-  char *plainTextFile = NULL;
-  char *keyFile = NULL;
   struct sockaddr_in serverAddress, clientAddress;
   socklen_t sizeOfClientInfo = sizeof(clientAddress);
 
@@ -94,14 +150,11 @@ int main(int argc, char *argv[]){
                           ntohs(clientAddress.sin_port));
 
     // Get the message from the client and display it
-    printf("Server Getting Message\n");
     memset(plaintext, '\0', 256);
     memset(key, '\0', 256);
     memset(verifykey, '\0', 50);
 
-    printf("Server Receiving Verification Key\n");
     verifyKeyRead = recv(connectionSocket, verifykey, 49, 0);
-    printf("SERVER: Received verification key: \"%s\"\n", verifykey);
     if (verifyKeyRead < 0) {
       error("ERROR reading verification key from socket");
     }
@@ -109,40 +162,46 @@ int main(int argc, char *argv[]){
     verifykey[verifyKeyRead] = '\0';
     verifykey[strcspn(verifykey, "\n")] = '\0';
 
-    printf("Server Comparing Verification Key\n");
     if (strcmp(verifykey, "enc_client_key") != 0){
       printf("SERVER: Verification key mismatch! Closing connection.\n");
       close(connectionSocket);
       continue;
     }
 
-    printf("Server Reading Plaintext\n");
+    send(connectionSocket, "ACK", 3, 0);
+
     // Read the client's message from the socket
     charsReadPlaintext = recv(connectionSocket, plaintext, 255, 0);
+    send(connectionSocket, "ACK", 3, 0);
     if (charsReadPlaintext < 0){
       error("ERROR reading plaintext from socket");
     }
 
-    printf("Server Reading Key\n");
     charsReadKey = recv(connectionSocket, key, 255, 0);
+    send(connectionSocket, "ACK", 3, 0);
     if (charsReadKey < 0){
       error("ERROR reading key from socket");
     }
 
-    printf("SERVER: plaintext received this from the client: \"%s\"\n", plaintext);
-    printf("SERVER: Received key: \"%s\"\n", key);
-
-    // Send a Success message back to the client
-    charsReadPlaintext = send(connectionSocket, 
-                    "I am the server, and I received the plaintext message", 53, 0); 
-    if (charsReadPlaintext < 0){
-      error("ERROR writing to socket");
+    //From here on, the plaintext file name from the client is stored in plaintext and they key file name
+    //from the cleint is stored in key
+    //Need to: open the files, verify that the key is at least as big as the plaintext,
+    //write back the cipher text to enc_client on the connectionsocket
+    
+    char *cipherText = processFile(plaintext, key);
+    if (cipherText == NULL){
+      printf("Error: Cipher text is NULL\n");
+    }else if(cipherText[0] == '\0'){
+      printf("Cipher text is empty!\n");
+    }else{
+      printf("Server printing cipher text: %s\n", cipherText);
     }
-
-    charsReadKey = send(connectionSocket, 
-      "I am the server, and I received the key message", 47, 0); 
-    if (charsReadKey < 0){
-    error("ERROR writing to socket");
+    if(cipherText == NULL){
+      printf("SERVER ERROR: Key is shorter than plaintext\n");
+      close(connectionSocket);
+      continue;
+    }else{
+      send(connectionSocket, cipherText, strlen(cipherText), 0);
     }
 
     // Close the connection socket for this client
