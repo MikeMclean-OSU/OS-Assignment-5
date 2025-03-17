@@ -5,6 +5,7 @@
 #include <sys/types.h>  // ssize_t
 #include <sys/socket.h> // send(),recv()
 #include <netdb.h>      // gethostbyname()
+#include <ctype.h>
 
 /**
 * Client code
@@ -38,12 +39,34 @@ int main(int argc, char *argv[]) {
   struct sockaddr_in serverAddress;
   char buffer[256];
   char ack[10];
+  char *cipherTextString = NULL;
+  char *keyFileString = NULL;
+  size_t len_ciphertext = 0;
+  size_t len_key = 0;
   
   // Check usage & args
   if (argc < 4) { 
     fprintf(stderr,"USAGE: %s plaintext key port\n", argv[0]); 
     exit(0); 
-  } 
+  }
+
+  FILE *plainTextFile = fopen(argv[1], "r");
+  FILE *keyFile = fopen(argv[2], "r");
+
+  getline(&cipherTextString, &len_ciphertext, plainTextFile);
+  getline(&keyFileString, &len_key, keyFile);
+
+  len_ciphertext = strlen(cipherTextString);
+  len_key = strlen(keyFileString);
+  
+  fclose(plainTextFile);
+  fclose(keyFile);
+
+  if (len_key < len_ciphertext){
+    free(cipherTextString);
+    free(keyFileString);
+    error("Error: Key is too short");
+  }
 
   // Create a socket
   socketFD = socket(AF_INET, SOCK_STREAM, 0); 
@@ -54,27 +77,36 @@ int main(int argc, char *argv[]) {
    // Set up the server address struct
   setupAddressStruct(&serverAddress, atoi(argv[3]));
 
-  printf("CLIENT: Attempting to connect to the server...\n");
   // Connect to server
   if (connect(socketFD, (struct sockaddr*)&serverAddress, sizeof(serverAddress)) < 0){
-    error("CLIENT: ERROR connecting");
+    fprintf(stderr, "CLIENT: ERROR connecting to port %d\n", atoi(argv[3]));
+    exit(2);
   }
 
   // Clear out the buffer array
   memset(buffer, '\0', sizeof(buffer));
   strncpy(buffer, "dec_client_key", sizeof(buffer) - 1);
-  printf("CLIENT: Sending verification key: \"%s\"\n", buffer);
 
   // Send verification key to server
   // Write to the server
   charsWritten = send(socketFD, buffer, strlen(buffer), 0);
-  recv(socketFD, ack, sizeof(ack) - 1, 0); 
   if (charsWritten < 0){
-    error("CLIENT: ERROR writing to socket");
+    fprintf(stderr, "CLIENT: ERROR connecting to port %d\n", atoi(argv[3]));
+    exit(2);
   }
   if (charsWritten < strlen(buffer)){
-    printf("CLIENT: WARNING: Not all data written to socket!\n");
+    fprintf(stderr, "CLIENT: ERROR connecting to port %d\n", atoi(argv[3]));
+    exit(2);
   }
+
+  charsRead = recv(socketFD, ack, sizeof(ack) - 1, 0); 
+  if (charsRead < 0) {
+    fprintf(stderr, "CLIENT: ERROR connecting to port %d\n", atoi(argv[3]));
+    exit(2);
+    } else if (charsRead == 0) {
+    fprintf(stderr, "CLIENT: ERROR connecting to port %d\n", atoi(argv[3]));
+    exit(2);
+    }
 
   // Clear out the buffer array
   memset(buffer, '\0', sizeof(buffer));
@@ -91,7 +123,6 @@ int main(int argc, char *argv[]) {
     printf("CLIENT: WARNING: Not all data written to socket!\n");
   }
 
-
   memset(buffer, '\0', sizeof(buffer));
   strncpy(buffer, argv[2], sizeof(buffer) - 1);
 
@@ -106,8 +137,6 @@ int main(int argc, char *argv[]) {
     printf("CLIENT: WARNING: Not all data written to socket!\n");
   }
 
-  
-
   // Get return message from server
   // Clear out the buffer again for reuse
   memset(buffer, '\0', sizeof(buffer)); 
@@ -115,10 +144,16 @@ int main(int argc, char *argv[]) {
   if (charsRead < 0) {
       error("CLIENT: ERROR reading from socket");
   }
-  printf("CLIENT: I received this from the server: \"%s\"\n", buffer);
+  
+  for(int i = 0; buffer[i] != '\0'; i++){
+    if (isalpha(buffer[i]) == 0 && buffer[i] != ' '){
+      error("Error: Bad character in cipher received");
+    }
+  }
+
+  printf("%s\n", buffer);
 
   // Close the socket
   close(socketFD); 
   return 0;
 }
-

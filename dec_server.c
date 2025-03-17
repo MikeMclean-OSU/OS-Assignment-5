@@ -5,6 +5,15 @@
 #include <sys/types.h>
 #include <sys/socket.h>
 #include <netinet/in.h>
+#include <sys/wait.h>
+
+int MAX_CONNECTIONS = 5;
+
+// Error function used for reporting issues
+void error(const char *msg) {
+    perror(msg);
+    exit(1);
+  } 
 
 char *processFile(char* cipherTextPath, char* keyFilePath){
   size_t len_ciphertext = 0;
@@ -19,20 +28,27 @@ char *processFile(char* cipherTextPath, char* keyFilePath){
   FILE *messageFile = fopen(cipherTextPath, "r");
   FILE *keyFile = fopen(keyFilePath, "r");
 
-  if (!messageFile || !keyFile) {
-    printf("Error opening files.\n");
+  if (!keyFile) {
+    error("Error opening keyfile.\n");
+    return NULL;
+  }
+
+  if (!messageFile) {
+    error("Error opening cipherfile.\n");
     return NULL;
   }
 
   if (getline(&ciphertextString, &len_ciphertext, messageFile) == -1){
-    printf("Error reading ciphertext file.\n");
+    error("Error reading ciphertext file.\n");
     return NULL;
   }
 
   if (getline(&keyFileString, &len_key, keyFile) == -1){
-    printf("Error reading key file.\n");
+    error("Error reading key file.\n");
     return NULL;
   }
+  ciphertextString[strcspn(ciphertextString, "\n")] = '\0';
+  keyFileString[strcspn(keyFileString, "\n")] = '\0';
   
   len_ciphertext = strlen(ciphertextString);
   len_key = strlen(keyFileString);
@@ -49,7 +65,7 @@ char *processFile(char* cipherTextPath, char* keyFilePath){
   char *plainText = malloc(len_ciphertext + 1);
   int plainLetter;
 
-  for (int i = 0; i< len_ciphertext - 1; i++){
+  for (int i = 0; i< len_ciphertext; i++){
     if (ciphertextString[i] == ' '){
       textLetter = 26;
     }else{
@@ -62,7 +78,7 @@ char *processFile(char* cipherTextPath, char* keyFilePath){
       keyLetter = keyFileString[i] - 'A';
     }
 
-    plainLetter = (textLetter - keyLetter) % 27;
+    plainLetter = (textLetter - keyLetter + 27) % 27;
     if (plainLetter == 26){
       plainText[i] = ' ';
     }else{
@@ -74,17 +90,9 @@ char *processFile(char* cipherTextPath, char* keyFilePath){
 
   free(ciphertextString);
   free(keyFileString);
-  printf("%s\n", plainText);
   return plainText;
 
 }
-
-
-// Error function used for reporting issues
-void error(const char *msg) {
-  perror(msg);
-  exit(1);
-} 
 
 // Set up the address struct for the server socket
 void setupAddressStruct(struct sockaddr_in* address, 
@@ -108,7 +116,8 @@ int main(int argc, char *argv[]){
   char verifykey[50];
   struct sockaddr_in serverAddress, clientAddress;
   socklen_t sizeOfClientInfo = sizeof(clientAddress);
-
+  int num_connects = 0;
+  pid_t id;
 
   // Check usage & args
   if (argc < 2) { 
@@ -138,6 +147,12 @@ int main(int argc, char *argv[]){
   // Accept a connection, blocking if one is not available until one connects
   while(1){
     // Accept the connection request which creates a connection socket
+
+    if(num_connects == MAX_CONNECTIONS){
+        sleep(5);
+        continue;
+      }
+
     connectionSocket = accept(listenSocket, 
                 (struct sockaddr *)&clientAddress, 
                 &sizeOfClientInfo); 
@@ -145,67 +160,73 @@ int main(int argc, char *argv[]){
       error("ERROR on accept");
     }
 
-    printf("SERVER: Connected to client running at host %d port %d\n", 
-                          ntohs(clientAddress.sin_addr.s_addr),
-                          ntohs(clientAddress.sin_port));
-
-    // Get the message from the client and display it
-    memset(ciphertext, '\0', 256);
-    memset(key, '\0', 256);
-    memset(verifykey, '\0', 50);
-
-    verifyKeyRead = recv(connectionSocket, verifykey, 49, 0);
-    if (verifyKeyRead < 0) {
-      error("ERROR reading verification key from socket");
-    }
-
-    verifykey[verifyKeyRead] = '\0';
-    verifykey[strcspn(verifykey, "\n")] = '\0';
-
-    if (strcmp(verifykey, "dec_client_key") != 0){
-      printf("SERVER: Verification key mismatch! Closing connection.\n");
-      close(connectionSocket);
-      continue;
-    }
-
-    send(connectionSocket, "ACK", 3, 0);
-
-    // Read the client's message from the socket
-    charsReadCipherText = recv(connectionSocket, ciphertext, 255, 0);
-    send(connectionSocket, "ACK", 3, 0);
-    if (charsReadCipherText < 0){
-      error("ERROR reading ciphertext from socket");
-    }
-
-    charsReadKey = recv(connectionSocket, key, 255, 0);
-    send(connectionSocket, "ACK", 3, 0);
-    if (charsReadKey < 0){
-      error("ERROR reading key from socket");
-    }
-
-    //From here on, the plaintext file name from the client is stored in plaintext and they key file name
-    //from the cleint is stored in key
-    //Need to: open the files, verify that the key is at least as big as the plaintext,
-    //write back the cipher text to enc_client on the connectionsocket
+    num_connects++;
+    pid_t pid = fork();
     
-    char *cipherText = processFile(cipherText, key);
-    if (cipherText == NULL){
-      printf("Error: Cipher text is NULL\n");
-    }else if(cipherText[0] == '\0'){
-      printf("Cipher text is empty!\n");
-    }else{
-      printf("Server printing cipher text: %s\n", cipherText);
-    }
-    if(cipherText == NULL){
-      printf("SERVER ERROR: Key is shorter than ciphertext\n");
-      close(connectionSocket);
-      continue;
-    }else{
-      send(connectionSocket, cipherText, strlen(cipherText), 0);
-    }
+    if(pid ==0){
+        printf("SERVER: Connected to client running at host %d port %d\n", 
+                            ntohs(clientAddress.sin_addr.s_addr),
+                            ntohs(clientAddress.sin_port));
 
-    // Close the connection socket for this client
-    close(connectionSocket); 
+        // Get the message from the client and display it
+        memset(ciphertext, '\0', 256);
+        memset(key, '\0', 256);
+        memset(verifykey, '\0', 50);
+
+        verifyKeyRead = recv(connectionSocket, verifykey, 49, 0);
+        if (verifyKeyRead < 0) {
+        error("ERROR reading verification key from socket");
+        }
+
+        verifykey[verifyKeyRead] = '\0';
+        verifykey[strcspn(verifykey, "\n")] = '\0';
+
+        if (strcmp(verifykey, "dec_client_key") != 0){
+        error("SERVER: Verification key mismatch! Closing connection.\n");
+        close(connectionSocket);
+        continue;
+        }
+
+        send(connectionSocket, "ACK", 3, 0);
+
+        // Read the client's message from the socket
+        charsReadCipherText = recv(connectionSocket, ciphertext, 255, 0);
+        send(connectionSocket, "ACK", 3, 0);
+        if (charsReadCipherText < 0){
+        error("ERROR reading ciphertext from socket");
+        }
+
+        charsReadKey = recv(connectionSocket, key, 255, 0);
+        send(connectionSocket, "ACK", 3, 0);
+        if (charsReadKey < 0){
+        error("ERROR reading key from socket");
+        }
+
+        //From here on, the plaintext file name from the client is stored in plaintext and they key file name
+        //from the cleint is stored in key
+        //Need to: open the files, verify that the key is at least as big as the plaintext,
+        //write back the cipher text to enc_client on the connectionsocket
+        
+        char *decipherText = processFile(ciphertext, key);
+        if(decipherText == NULL){
+        error("SERVER ERROR: Key is shorter than ciphertext\n");
+        close(connectionSocket);
+        continue;
+        }else{
+        send(connectionSocket, decipherText, strlen(decipherText), 0);
+        }
+
+        // Close the connection socket for this client
+        close(connectionSocket);
+        exit(0);
+    }else{
+        close(connectionSocket);
+        id = waitpid(-1, NULL, WNOHANG);
+        while (id > 0){
+            num_connects--;
+            id = waitpid(-1, NULL, WNOHANG);
+        }
+    }
   }
   // Close the listening socket
   close(listenSocket); 
