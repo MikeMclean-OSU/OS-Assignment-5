@@ -40,7 +40,9 @@ char *processFile(char* plainTextPath, char* keyFilePath){
     error("Error reading key file.\n");
     return NULL;
   }
-  
+  plaintextString[strcspn(plaintextString, "\n")] = '\0';
+  keyFileString[strcspn(keyFileString, "\n")] = '\0';
+
   len_plaintext = strlen(plaintextString);
   len_key = strlen(keyFileString);
   
@@ -56,7 +58,7 @@ char *processFile(char* plainTextPath, char* keyFilePath){
   char *cipherText = malloc(len_plaintext + 1);
   int cipherLetter;
 
-  for (int i = 0; i< len_plaintext - 1; i++){
+  for (int i = 0; i< len_plaintext; i++){
     if (plaintextString[i] == ' '){
       textLetter = 26;
     }else{

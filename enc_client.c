@@ -145,7 +145,7 @@ int main(int argc, char *argv[]) {
   if (charsRead < 0) {
       error("CLIENT: ERROR reading from socket");
   }
-  
+
   for(int i = 0; buffer[i] != '\0'; i++){
     if (isalpha(buffer[i]) == 0 && buffer[i] != ' '){
       error("Error: Bad character in cipher received");
