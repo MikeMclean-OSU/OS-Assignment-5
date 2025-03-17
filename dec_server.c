@@ -23,8 +23,6 @@ char *processFile(char* cipherTextPath, char* keyFilePath){
   int textLetter;
   int keyLetter;
 
-  printf("Starting processing files\n");
-
   FILE *messageFile = fopen(cipherTextPath, "r");
   FILE *keyFile = fopen(keyFilePath, "r");
 
@@ -164,10 +162,6 @@ int main(int argc, char *argv[]){
     pid_t pid = fork();
     
     if(pid ==0){
-        printf("SERVER: Connected to client running at host %d port %d\n", 
-                            ntohs(clientAddress.sin_addr.s_addr),
-                            ntohs(clientAddress.sin_port));
-
         // Get the message from the client and display it
         memset(ciphertext, '\0', 256);
         memset(key, '\0', 256);

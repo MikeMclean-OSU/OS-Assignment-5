@@ -23,8 +23,6 @@ char *processFile(char* plainTextPath, char* keyFilePath){
   int textLetter;
   int keyLetter;
 
-  printf("Starting processing files\n");
-
   FILE *messageFile = fopen(plainTextPath, "r");
   FILE *keyFile = fopen(keyFilePath, "r");
 
@@ -58,7 +56,7 @@ char *processFile(char* plainTextPath, char* keyFilePath){
   char *cipherText = malloc(len_plaintext + 1);
   int cipherLetter;
 
-  for (int i = 0; i< len_plaintext; i++){
+  for (int i = 0; i< len_plaintext - 1; i++){
     if (plaintextString[i] == ' '){
       textLetter = 26;
     }else{
@@ -158,9 +156,6 @@ int main(int argc, char *argv[]){
     pid_t pid = fork();
 
     if(pid == 0){
-      printf("SERVER: Connected to client running at host %d port %d\n", 
-                            ntohs(clientAddress.sin_addr.s_addr),
-                            ntohs(clientAddress.sin_port));
 
       // Get the message from the client and display it
       memset(plaintext, '\0', 256);
@@ -207,7 +202,6 @@ int main(int argc, char *argv[]){
         close(connectionSocket);
         continue;
       }else{
-        printf("Server sending back cipher: %s\n", cipherText);
         send(connectionSocket, cipherText, strlen(cipherText), 0);
       }
 
